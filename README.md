@@ -37,6 +37,35 @@ dpty list  [servers|sessions]     # list state via the broker (default: sessions
 dpty create [-name N] ...         # create a new PTY through the broker
 ```
 
+## Run as a startup agent
+
+`tools/install-agent.sh` installs the broker or a server as a user-level
+startup agent — launchd on macOS, systemd `--user` on Linux (Ubuntu,
+Raspberry Pi OS).
+
+```sh
+tools/install-agent.sh broker
+tools/install-agent.sh server
+```
+
+Each role reads its config from
+`${XDG_CONFIG_HOME:-$HOME/.config}/dpty/<role>.conf` at every start. One CLI
+flag per line; blank lines and `#` comments ignored. Restart the agent to
+apply changes:
+
+```sh
+# macOS
+launchctl kickstart -k gui/$UID/dev.kjh.dpty-broker
+# Linux
+systemctl --user restart dpty-broker
+```
+
+Uninstall: `tools/uninstall-agent.sh {broker|server}`.
+
+See [docs/daemons.md](docs/daemons.md) for the full reference (install
+options, config format, logs, status, and how to enable lingering on Linux
+so agents survive logout).
+
 ## Library
 
 ### Go

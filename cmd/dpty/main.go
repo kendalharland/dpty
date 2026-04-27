@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"kjh.dev/dpty"
@@ -144,10 +145,12 @@ func cmdList(args []string) int {
 			fmt.Println("No registered servers.")
 			return 0
 		}
-		fmt.Printf("%-32s  %-12s  %5s\n", "ID", "STATUS", "LOAD")
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "ID\tSTATUS\tLOAD")
 		for _, s := range servers {
-			fmt.Printf("%-32s  %-12s  %5d\n", s.ID, s.Status, s.Load)
+			fmt.Fprintf(tw, "%s\t%s\t%d\n", s.ID, s.Status, s.Load)
 		}
+		tw.Flush()
 	case "sessions":
 		sess, err := c.ListSessions(ctx)
 		if err != nil {
@@ -158,11 +161,13 @@ func cmdList(args []string) int {
 			fmt.Println("No active sessions.")
 			return 0
 		}
-		fmt.Printf("%-60s  %-12s  %s\n", "URL", "CMD", "CREATED")
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "URL\tCMD\tCREATED")
 		for _, s := range sess {
 			wsURL := dpty.AttachWebSocketURL(s.ServerAddress, s.Alias)
-			fmt.Printf("%-60s  %-12s  %s\n", wsURL, s.Shell, s.CreatedAt.Format(time.RFC3339))
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", wsURL, s.Shell, s.CreatedAt.Format(time.RFC3339))
 		}
+		tw.Flush()
 	default:
 		fmt.Printf("Unknown list target: %s (expected 'servers' or 'sessions')\n", target)
 		return 1
