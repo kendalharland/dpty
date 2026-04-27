@@ -129,11 +129,37 @@
       font-size: 13px;
       padding: 4px 2px;
     }
+
+    #broker-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #777;
+      margin-bottom: 12px;
+    }
+
+    #broker-input {
+      flex: 1;
+      padding: 4px 6px;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      background: #000;
+      color: #aaa;
+      border: 1px solid #333;
+      border-radius: 3px;
+      box-sizing: border-box;
+    }
   </style>
 </head>
 <body>
   <div class="app">
     <h1>dpty.dev</h1>
+
+    <div id="broker-bar">
+      <label for="broker-input">Broker:</label>
+      <input id="broker-input" type="text" autocomplete="off" spellcheck="false" />
+    </div>
 
     <h2>Start a new claude session</h2>
     <form id="prompt-form">
@@ -164,6 +190,20 @@
     const promptInput = document.getElementById('prompt-input');
     const statusLine = document.getElementById('status-line');
     const sessionsList = document.getElementById('sessions-list');
+    const brokerInput = document.getElementById('broker-input');
+
+    brokerInput.value = BROKER_URL;
+    function applyBroker() {
+      const next = brokerInput.value.trim();
+      if (!next || next === BROKER_URL) return;
+      const url = new URL(window.location.href);
+      url.searchParams.set('broker', next);
+      window.location.href = url.toString();
+    }
+    brokerInput.addEventListener('change', applyBroker);
+    brokerInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); applyBroker(); }
+    });
 
     function setStatus(text, isError) {
       statusLine.textContent = text || '';
