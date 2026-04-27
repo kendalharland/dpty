@@ -19,7 +19,7 @@ go build -o bin/dpty ./cmd/dpty
 ./bin/dpty serve
 
 # Tab 3 - serve the static HTML
-python3 -m http.server 8080
+cd demo; python3 -m http.server 8080
 ```
 
 Visit http://localhost:8080.
@@ -39,6 +39,8 @@ dpty create [-name N] ...         # create a new PTY through the broker
 
 ## Library
 
+### Go
+
 ```go
 import "kjh.dev/dpty"
 ```
@@ -50,3 +52,26 @@ See `doc.go` for the package overview. Key APIs:
 - `dpty.NewClient(brokerURL)` with `ListServers`, `ListSessions`,
   `PickAvailableServer`, `CreatePTY`
 - `dpty.AttachWebSocketURL(serverAddress, alias)`
+
+### JavaScript (browser, ES module)
+
+```js
+import { Client, Attachment, attachWebSocketUrl } from './dpty.js';
+
+const c = new Client('http://localhost:5127');
+const target = await c.pickAvailableServer();
+const { alias } = await c.createPTY(target.address, {
+  shell: 'claude', args: ['hello'],
+});
+
+const att = new Attachment(target.address, alias, {
+  onOutput: (text) => term.write(text),
+  onClose:  ()    => console.log('closed'),
+});
+att.resize(80, 24);
+att.send('ls\r');
+```
+
+`demo/dpty.js` mirrors the Go library: a `Client` for broker / server
+HTTP calls, an `Attachment` that wraps the WebSocket attach protocol, and
+typed errors (`SessionExistsError`, `InvalidNameError`, `NoServersError`).

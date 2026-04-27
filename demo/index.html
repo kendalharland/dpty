@@ -149,173 +149,141 @@
     <div id="sessions-list"><div class="empty">Loading...</div></div>
   </div>
 
-  <script>
-    (function () {
-      // Broker URL: defaults to localhost:5127. Override at runtime by
-      // appending ?broker=http://host:port to the page URL.
-      const BROKER_URL = (
-        new URLSearchParams(window.location.search).get('broker')
-        || 'http://localhost:5127'
-      ).replace(/\/$/, '');
+  <script type="module">
+    import { Client } from './dpty.js';
 
-      const promptForm = document.getElementById('prompt-form');
-      const promptInput = document.getElementById('prompt-input');
-      const statusLine = document.getElementById('status-line');
-      const sessionsList = document.getElementById('sessions-list');
+    // Broker URL: defaults to localhost:5127. Override at runtime by
+    // appending ?broker=http://host:port to the page URL.
+    const BROKER_URL =
+      new URLSearchParams(window.location.search).get('broker')
+      || 'http://localhost:5127';
 
-      function setStatus(text, isError) {
-        statusLine.textContent = text || '';
-        statusLine.classList.toggle('error', !!isError);
+    const client = new Client(BROKER_URL);
+
+    const promptForm = document.getElementById('prompt-form');
+    const promptInput = document.getElementById('prompt-input');
+    const statusLine = document.getElementById('status-line');
+    const sessionsList = document.getElementById('sessions-list');
+
+    function setStatus(text, isError) {
+      statusLine.textContent = text || '';
+      statusLine.classList.toggle('error', !!isError);
+    }
+
+    function sessionUrl(serverAddress, alias) {
+      return 'session.html?server=' + encodeURIComponent(serverAddress) +
+             '&alias=' + encodeURIComponent(alias);
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const ageS = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+      if (ageS < 60) return ageS + 's ago';
+      if (ageS < 3600) return Math.floor(ageS / 60) + 'm ago';
+      if (ageS < 86400) return Math.floor(ageS / 3600) + 'h ago';
+      return Math.floor(ageS / 86400) + 'd ago';
+    }
+
+    function shortAlias(a) {
+      return a && a.length > 8 ? a.slice(0, 8) : (a || '');
+    }
+
+    function renderEmpty(text) {
+      sessionsList.innerHTML = '';
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = text;
+      sessionsList.appendChild(e);
+    }
+
+    function renderSessions(sessions) {
+      if (!sessions || sessions.length === 0) {
+        renderEmpty('No active sessions.');
+        return;
       }
+      sessionsList.innerHTML = '';
+      sessions.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      for (const s of sessions) {
+        const row = document.createElement('div');
+        row.className = 'session-row';
 
-      function sessionUrl(serverAddress, alias) {
-        return 'session.html?server=' + encodeURIComponent(serverAddress) +
-               '&alias=' + encodeURIComponent(alias);
-      }
+        const meta = document.createElement('div');
+        meta.className = 'session-meta';
 
-      function formatTime(iso) {
-        if (!iso) return '';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return '';
-        const ageS = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-        if (ageS < 60) return ageS + 's ago';
-        if (ageS < 3600) return Math.floor(ageS / 60) + 'm ago';
-        if (ageS < 86400) return Math.floor(ageS / 3600) + 'h ago';
-        return Math.floor(ageS / 86400) + 'd ago';
-      }
+        const aliasEl = document.createElement('span');
+        aliasEl.className = 'session-alias';
+        aliasEl.textContent = shortAlias(s.alias);
+        meta.appendChild(aliasEl);
 
-      function shortAlias(a) {
-        return a && a.length > 8 ? a.slice(0, 8) : (a || '');
-      }
+        const shellEl = document.createElement('span');
+        shellEl.className = 'session-shell';
+        shellEl.textContent = s.shell || '';
+        meta.appendChild(shellEl);
 
-      function renderSessions(sessions) {
-        sessionsList.innerHTML = '';
-        if (!sessions || sessions.length === 0) {
-          const empty = document.createElement('div');
-          empty.className = 'empty';
-          empty.textContent = 'No active sessions.';
-          sessionsList.appendChild(empty);
-          return;
+        const argsEl = document.createElement('span');
+        argsEl.className = 'session-args';
+        argsEl.textContent = (s.args && s.args.length) ? s.args.join(' ') : '';
+        meta.appendChild(argsEl);
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'session-time';
+        timeEl.textContent = formatTime(s.createdAt);
+        meta.appendChild(timeEl);
+
+        if (s.inUse) {
+          const inuseEl = document.createElement('span');
+          inuseEl.className = 'session-inuse';
+          inuseEl.textContent = '(attached)';
+          meta.appendChild(inuseEl);
         }
-        sessions.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        for (const s of sessions) {
-          const row = document.createElement('div');
-          row.className = 'session-row';
 
-          const meta = document.createElement('div');
-          meta.className = 'session-meta';
+        row.appendChild(meta);
 
-          const aliasEl = document.createElement('span');
-          aliasEl.className = 'session-alias';
-          aliasEl.textContent = shortAlias(s.alias);
-          meta.appendChild(aliasEl);
-
-          const shellEl = document.createElement('span');
-          shellEl.className = 'session-shell';
-          shellEl.textContent = s.shell || '';
-          meta.appendChild(shellEl);
-
-          const argsEl = document.createElement('span');
-          argsEl.className = 'session-args';
-          argsEl.textContent = (s.args && s.args.length) ? s.args.join(' ') : '';
-          meta.appendChild(argsEl);
-
-          const timeEl = document.createElement('span');
-          timeEl.className = 'session-time';
-          timeEl.textContent = formatTime(s.createdAt);
-          meta.appendChild(timeEl);
-
-          if (s.inUse) {
-            const inuseEl = document.createElement('span');
-            inuseEl.className = 'session-inuse';
-            inuseEl.textContent = '(attached)';
-            meta.appendChild(inuseEl);
-          }
-
-          row.appendChild(meta);
-
-          const link = document.createElement('a');
-          link.className = 'session-action' + (s.inUse ? ' disabled' : '');
-          link.textContent = s.inUse ? 'In use' : 'Reopen';
-          if (!s.inUse) {
-            link.href = sessionUrl(s.serverAddress, s.alias);
-          }
-          row.appendChild(link);
-
-          sessionsList.appendChild(row);
+        const link = document.createElement('a');
+        link.className = 'session-action' + (s.inUse ? ' disabled' : '');
+        link.textContent = s.inUse ? 'In use' : 'Reopen';
+        if (!s.inUse) {
+          link.href = sessionUrl(s.serverAddress, s.alias);
         }
+        row.appendChild(link);
+
+        sessionsList.appendChild(row);
       }
+    }
 
-      async function refreshSessions() {
-        try {
-          const resp = await fetch(BROKER_URL + '/sessions');
-          if (!resp.ok) {
-            sessionsList.innerHTML = '';
-            const e = document.createElement('div');
-            e.className = 'empty';
-            e.textContent = 'Broker returned ' + resp.status + ' for /sessions.';
-            sessionsList.appendChild(e);
-            return;
-          }
-          renderSessions(await resp.json());
-        } catch (err) {
-          sessionsList.innerHTML = '';
-          const e = document.createElement('div');
-          e.className = 'empty';
-          e.textContent = 'Broker unreachable at ' + BROKER_URL + ': ' + err;
-          sessionsList.appendChild(e);
-        }
+    async function refreshSessions() {
+      try {
+        renderSessions(await client.listSessions());
+      } catch (err) {
+        renderEmpty('Broker unreachable at ' + BROKER_URL + ': ' + err.message);
       }
+    }
 
-      async function pickServer() {
-        const resp = await fetch(BROKER_URL + '/servers');
-        if (!resp.ok) throw new Error('broker /servers returned ' + resp.status);
-        const servers = await resp.json();
-        let target = null;
-        for (const s of servers) {
-          if (s.status !== 'AVAILABLE') continue;
-          if (!target || (s.load || 0) < (target.load || 0)) target = s;
-        }
-        if (!target) throw new Error('no AVAILABLE dpty servers');
-        return target;
+    async function createSession(prompt) {
+      setStatus('Creating PTY...');
+      try {
+        const target = await client.pickAvailableServer();
+        const { alias } = await client.createPTY(target.address, {
+          shell: 'claude',
+          args: [prompt],
+        });
+        window.location.href = sessionUrl(target.address, alias);
+      } catch (err) {
+        setStatus(err.message || String(err), true);
       }
+    }
 
-      async function createSession(prompt) {
-        setStatus('Creating PTY...');
-        try {
-          const target = await pickServer();
-          const ptyUrl = target.address.replace(/\/$/, '') + '/pty';
-          const resp = await fetch(ptyUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shell: 'claude', args: [prompt], env: [] }),
-          });
-          if (!resp.ok) {
-            let msg = 'server returned ' + resp.status + ' for /pty';
-            try {
-              const data = await resp.json();
-              if (data && data.error) msg = data.error;
-            } catch (e) {}
-            setStatus(msg, true);
-            return;
-          }
-          const data = await resp.json();
-          window.location.href = sessionUrl(target.address, data.alias);
-        } catch (err) {
-          setStatus(err.message || String(err), true);
-        }
-      }
+    promptForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const prompt = promptInput.value.trim();
+      if (!prompt) return;
+      createSession(prompt);
+    });
 
-      promptForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        const prompt = promptInput.value.trim();
-        if (!prompt) return;
-        createSession(prompt);
-      });
-
-      refreshSessions();
-      setInterval(refreshSessions, 5000);
-    })();
+    refreshSessions();
+    setInterval(refreshSessions, 5000);
   </script>
 </body>
 </html>
