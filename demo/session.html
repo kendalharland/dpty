@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Browser PTY — Session</title>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Mono", Menlo, monospace;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+      box-sizing: border-box;
+      gap: 12px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #back-link {
+      color: #8ab4ff;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    #back-link:hover { text-decoration: underline; }
+
+    #title {
+      color: #999;
+      font-size: 12px;
+      font-family: "SF Mono", Menlo, monospace;
+    }
+
+    #status {
+      color: #ff7070;
+      font-size: 12px;
+      min-height: 1em;
+    }
+
+    #terminal-container {
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #000;
+      padding: 4px;
+      box-sizing: border-box;
+      width: 820px;
+      height: 540px;
+      min-width: 320px;
+      min-height: 200px;
+      max-width: 100%;
+      resize: both;
+      overflow: hidden;
+    }
+
+    #terminal-inner {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+
+  <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm/css/xterm.css">
+  <script src="https://unpkg.com/@xterm/xterm/lib/xterm.js"></script>
+  <script src="https://unpkg.com/@xterm/addon-fit/lib/addon-fit.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <a id="back-link" href="index.html">&larr; Back to sessions</a>
+    <div id="title"></div>
+  </div>
+
+  <div id="status"></div>
+
+  <div id="terminal-container">
+    <div id="terminal-inner"></div>
+  </div>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const serverAddress = params.get('server');
+      const alias = params.get('alias');
+
+      const titleEl = document.getElementById('title');
+      const statusEl = document.getElementById('status');
+      const termContainer = document.getElementById('terminal-container');
+      const termInner = document.getElementById('terminal-inner');
+
+      if (alias) {
+        titleEl.textContent = alias.slice(0, 8) + ' @ ' + (serverAddress || '?');
+      }
+
+      if (!serverAddress || !alias) {
+        statusEl.textContent = 'server and alias query params required';
+        return;
+      }
+
+      const term = new window.Terminal({
+        cursorBlink: true,
+        fontFamily: 'SF Mono, Menlo, monospace',
+        fontSize: 14,
+        theme: {
+          background: '#000000',
+          foreground: '#eeeeee'
+        }
+      });
+      const fitAddon = new window.FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(termInner);
+
+      termContainer.addEventListener('mousedown', () => term.focus());
+
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder('utf-8');
+
+      // Connect straight to the dpty server's WebSocket attach endpoint.
+      const wsUrl =
+        serverAddress
+          .replace(/^https:/i, 'wss:')
+          .replace(/^http:/i, 'ws:')
+          .replace(/\/$/, '') +
+        '/' + encodeURIComponent(alias);
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      function sendCurrentResize() {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({
+          type: 'resize',
+          cols: term.cols,
+          rows: term.rows,
+        }));
+      }
+
+      function fitAndSendResize() {
+        const r = termContainer.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10) return;
+        try { fitAddon.fit(); } catch (e) { return; }
+        sendCurrentResize();
+      }
+
+      let resizeTimer = null;
+      function scheduleFit() {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(fitAndSendResize, 80);
+      }
+      const ro = new ResizeObserver(scheduleFit);
+      ro.observe(termContainer);
+      window.addEventListener('resize', scheduleFit);
+
+      ws.onopen = function () {
+        requestAnimationFrame(fitAndSendResize);
+        term.focus();
+      };
+      ws.onclose = function () {
+        term.write('\r\n[Disconnected]\r\n');
+      };
+      ws.onerror = function (err) {
+        term.write('\r\n[WebSocket error]\r\n');
+        console.error('WebSocket error:', err);
+      };
+      ws.onmessage = function (ev) {
+        if (ev.data instanceof ArrayBuffer) {
+          term.write(decoder.decode(new Uint8Array(ev.data), { stream: true }));
+        } else {
+          term.write(ev.data);
+        }
+      };
+
+      // Escape-sequence chunking so multi-byte sequences (arrow keys, etc.)
+      // are sent as one WebSocket message.
+      let escState = 'idle';
+      let escBuf = '';
+      let escTimer = null;
+      const ESC = '\x1b';
+      const ESC_TIMEOUT_MS = 50;
+
+      function resetEsc() {
+        escState = 'idle';
+        escBuf = '';
+        if (escTimer) {
+          clearTimeout(escTimer);
+          escTimer = null;
+        }
+      }
+      function flushEscBuf() {
+        if (!escBuf) return;
+        if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(escBuf));
+        resetEsc();
+      }
+      function scheduleEscTimeout() {
+        if (escTimer) clearTimeout(escTimer);
+        escTimer = setTimeout(flushEscBuf, ESC_TIMEOUT_MS);
+      }
+      function handleInputChunk(data) {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        for (let i = 0; i < data.length; i++) {
+          const ch = data[i];
+          if (escState === 'idle') {
+            if (ch === ESC) {
+              escState = 'esc';
+              escBuf = ch;
+              scheduleEscTimeout();
+            } else {
+              ws.send(encoder.encode(ch));
+            }
+            continue;
+          }
+          escBuf += ch;
+          if (escState === 'esc') {
+            if (ch === '[') { escState = 'csi'; scheduleEscTimeout(); continue; }
+            if (ch === 'O') { escState = 'ss3'; scheduleEscTimeout(); continue; }
+            flushEscBuf();
+            continue;
+          }
+          if (escState === 'csi') {
+            const code = ch.charCodeAt(0);
+            if (code >= 0x40 && code <= 0x7e) flushEscBuf();
+            else scheduleEscTimeout();
+            continue;
+          }
+          if (escState === 'ss3') {
+            flushEscBuf();
+            continue;
+          }
+        }
+      }
+
+      term.onData(handleInputChunk);
+    })();
+  </script>
+</body>
+</html>

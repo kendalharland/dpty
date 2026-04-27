@@ -1,0 +1,321 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Browser PTY</title>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Mono", Menlo, monospace;
+    }
+
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px 0;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 900px;
+      padding: 0 24px;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #999;
+      border-bottom: 1px solid #333;
+      padding-bottom: 4px;
+      margin-top: 24px;
+      margin-bottom: 12px;
+    }
+
+    #prompt-form {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    #prompt-input {
+      width: 100%;
+      padding: 8px 10px;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 14px;
+      background: #000;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+
+    #prompt-help, #status-line {
+      font-size: 12px;
+      color: #888;
+    }
+
+    #status-line {
+      min-height: 1em;
+      margin-top: 8px;
+    }
+    #status-line.error { color: #ff7070; }
+
+    #sessions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .session-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 10px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .session-meta {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-alias { color: #8ab4ff; }
+    .session-shell { color: #b9e07a; margin-left: 8px; }
+    .session-args  { color: #ccc;     margin-left: 8px; }
+    .session-time  { color: #777;     margin-left: 8px; font-size: 11px; }
+    .session-inuse { color: #ffb454;  margin-left: 8px; font-size: 11px; }
+
+    .session-action {
+      padding: 4px 10px;
+      background: #2a2a2a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .session-action:hover { background: #383838; }
+    .session-action.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .empty {
+      color: #777;
+      font-size: 13px;
+      padding: 4px 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>dpty.dev</h1>
+
+    <h2>Start a new claude session</h2>
+    <form id="prompt-form">
+      <input id="prompt-input" type="text" autocomplete="off" autofocus
+             placeholder="Write a prompt, then press Enter." />
+      <div id="prompt-help">
+        Enter creates a new dpty session running <code>claude</code> with your prompt as the initial argument.
+      </div>
+      <div id="status-line"></div>
+    </form>
+
+    <h2>Connect to an active session</h2>
+    <div id="sessions-list"><div class="empty">Loading...</div></div>
+  </div>
+
+  <script>
+    (function () {
+      // Broker URL: defaults to localhost:5127. Override at runtime by
+      // appending ?broker=http://host:port to the page URL.
+      const BROKER_URL = (
+        new URLSearchParams(window.location.search).get('broker')
+        || 'http://localhost:5127'
+      ).replace(/\/$/, '');
+
+      const promptForm = document.getElementById('prompt-form');
+      const promptInput = document.getElementById('prompt-input');
+      const statusLine = document.getElementById('status-line');
+      const sessionsList = document.getElementById('sessions-list');
+
+      function setStatus(text, isError) {
+        statusLine.textContent = text || '';
+        statusLine.classList.toggle('error', !!isError);
+      }
+
+      function sessionUrl(serverAddress, alias) {
+        return 'session.html?server=' + encodeURIComponent(serverAddress) +
+               '&alias=' + encodeURIComponent(alias);
+      }
+
+      function formatTime(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        const ageS = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+        if (ageS < 60) return ageS + 's ago';
+        if (ageS < 3600) return Math.floor(ageS / 60) + 'm ago';
+        if (ageS < 86400) return Math.floor(ageS / 3600) + 'h ago';
+        return Math.floor(ageS / 86400) + 'd ago';
+      }
+
+      function shortAlias(a) {
+        return a && a.length > 8 ? a.slice(0, 8) : (a || '');
+      }
+
+      function renderSessions(sessions) {
+        sessionsList.innerHTML = '';
+        if (!sessions || sessions.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = 'No active sessions.';
+          sessionsList.appendChild(empty);
+          return;
+        }
+        sessions.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        for (const s of sessions) {
+          const row = document.createElement('div');
+          row.className = 'session-row';
+
+          const meta = document.createElement('div');
+          meta.className = 'session-meta';
+
+          const aliasEl = document.createElement('span');
+          aliasEl.className = 'session-alias';
+          aliasEl.textContent = shortAlias(s.alias);
+          meta.appendChild(aliasEl);
+
+          const shellEl = document.createElement('span');
+          shellEl.className = 'session-shell';
+          shellEl.textContent = s.shell || '';
+          meta.appendChild(shellEl);
+
+          const argsEl = document.createElement('span');
+          argsEl.className = 'session-args';
+          argsEl.textContent = (s.args && s.args.length) ? s.args.join(' ') : '';
+          meta.appendChild(argsEl);
+
+          const timeEl = document.createElement('span');
+          timeEl.className = 'session-time';
+          timeEl.textContent = formatTime(s.createdAt);
+          meta.appendChild(timeEl);
+
+          if (s.inUse) {
+            const inuseEl = document.createElement('span');
+            inuseEl.className = 'session-inuse';
+            inuseEl.textContent = '(attached)';
+            meta.appendChild(inuseEl);
+          }
+
+          row.appendChild(meta);
+
+          const link = document.createElement('a');
+          link.className = 'session-action' + (s.inUse ? ' disabled' : '');
+          link.textContent = s.inUse ? 'In use' : 'Reopen';
+          if (!s.inUse) {
+            link.href = sessionUrl(s.serverAddress, s.alias);
+          }
+          row.appendChild(link);
+
+          sessionsList.appendChild(row);
+        }
+      }
+
+      async function refreshSessions() {
+        try {
+          const resp = await fetch(BROKER_URL + '/sessions');
+          if (!resp.ok) {
+            sessionsList.innerHTML = '';
+            const e = document.createElement('div');
+            e.className = 'empty';
+            e.textContent = 'Broker returned ' + resp.status + ' for /sessions.';
+            sessionsList.appendChild(e);
+            return;
+          }
+          renderSessions(await resp.json());
+        } catch (err) {
+          sessionsList.innerHTML = '';
+          const e = document.createElement('div');
+          e.className = 'empty';
+          e.textContent = 'Broker unreachable at ' + BROKER_URL + ': ' + err;
+          sessionsList.appendChild(e);
+        }
+      }
+
+      async function pickServer() {
+        const resp = await fetch(BROKER_URL + '/servers');
+        if (!resp.ok) throw new Error('broker /servers returned ' + resp.status);
+        const servers = await resp.json();
+        let target = null;
+        for (const s of servers) {
+          if (s.status !== 'AVAILABLE') continue;
+          if (!target || (s.load || 0) < (target.load || 0)) target = s;
+        }
+        if (!target) throw new Error('no AVAILABLE dpty servers');
+        return target;
+      }
+
+      async function createSession(prompt) {
+        setStatus('Creating PTY...');
+        try {
+          const target = await pickServer();
+          const ptyUrl = target.address.replace(/\/$/, '') + '/pty';
+          const resp = await fetch(ptyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shell: 'claude', args: [prompt], env: [] }),
+          });
+          if (!resp.ok) {
+            let msg = 'server returned ' + resp.status + ' for /pty';
+            try {
+              const data = await resp.json();
+              if (data && data.error) msg = data.error;
+            } catch (e) {}
+            setStatus(msg, true);
+            return;
+          }
+          const data = await resp.json();
+          window.location.href = sessionUrl(target.address, data.alias);
+        } catch (err) {
+          setStatus(err.message || String(err), true);
+        }
+      }
+
+      promptForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const prompt = promptInput.value.trim();
+        if (!prompt) return;
+        createSession(prompt);
+      });
+
+      refreshSessions();
+      setInterval(refreshSessions, 5000);
+    })();
+  </script>
+</body>
+</html>
