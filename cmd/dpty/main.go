@@ -7,6 +7,8 @@
 //	dpty list  [servers|sessions]     - list state via the broker (default: sessions)
 //	dpty create [-name N] [-server ID] [-shell ...] [-arg ...] [-env ...]
 //	                                  - create a new PTY through the broker
+//	dpty config get <key>             - read a saved CLI config value
+//	dpty config set <key> <value>     - write a saved CLI config value
 package main
 
 import (
@@ -42,6 +44,8 @@ func main() {
 		os.Exit(cmdList(os.Args[2:]))
 	case "create":
 		os.Exit(cmdCreate(os.Args[2:]))
+	case "config":
+		os.Exit(cmdConfig(os.Args[2:]))
 	case "-h", "--help", "help":
 		usageAndExit(0)
 	default:
@@ -51,7 +55,7 @@ func main() {
 }
 
 func usageAndExit(code int) {
-	fmt.Fprintln(os.Stderr, "Usage: dpty {broker|serve|list|create} [options...]")
+	fmt.Fprintln(os.Stderr, "Usage: dpty {broker|serve|list|create|config} [options...]")
 	os.Exit(code)
 }
 
@@ -90,7 +94,7 @@ func cmdServe(args []string) int {
 	port := fs.Int("port", defaultServerPort, "Server listen port")
 	id := fs.String("id", "", "Server ID (default: hostname:port)")
 	shell := fs.String("shell", "/bin/bash", "Default shell when /pty omits Shell")
-	brokerURL := fs.String("broker", "http://localhost:"+strconv.Itoa(defaultBrokerPort), "Broker URL to register with")
+	brokerURL := fs.String("broker", effectiveBrokerURL(), "Broker URL to register with")
 	advertise := fs.String("advertise", "", "URL the broker should use to reach this server (default: http://localhost:port)")
 	fs.Var(&shellArgs, "arg", "Default arg appended when /pty omits Args (repeatable)")
 	fs.Var(&envs, "env", "Default env (KEY=VALUE) appended when /pty omits Env (repeatable)")
@@ -130,7 +134,7 @@ func cmdList(args []string) int {
 	if len(args) > 0 {
 		target = args[0]
 	}
-	c := dpty.NewClient("http://localhost:" + strconv.Itoa(defaultBrokerPort))
+	c := dpty.NewClient(effectiveBrokerURL())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -192,7 +196,7 @@ func cmdCreate(args []string) int {
 		return 1
 	}
 
-	c := dpty.NewClient("http://localhost:" + strconv.Itoa(defaultBrokerPort))
+	c := dpty.NewClient(effectiveBrokerURL())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
