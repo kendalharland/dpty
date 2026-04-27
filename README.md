@@ -66,6 +66,13 @@ See [docs/daemons.md](docs/daemons.md) for the full reference (install
 options, config format, logs, status, and how to enable lingering on Linux
 so agents survive logout).
 
+## Docker
+
+A `Dockerfile` is included that builds a single image runnable as either
+the broker or a server (pick via `command:`). The repo does not ship its
+own `compose.yaml`; instead, [docs/docker.md](docs/docker.md) has a
+copy-pasteable service snippet for an existing compose project.
+
 ## Library
 
 ### Go
