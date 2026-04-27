@@ -44,13 +44,13 @@
       margin-bottom: 12px;
     }
 
-    #prompt-form {
+    #prompt-form, #shell-form {
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
 
-    #prompt-input {
+    #prompt-input, #shell-input {
       width: 100%;
       padding: 8px 10px;
       font-family: "SF Mono", Menlo, monospace;
@@ -62,7 +62,7 @@
       box-sizing: border-box;
     }
 
-    #prompt-help, #status-line {
+    #prompt-help, #shell-help, #status-line {
       font-size: 12px;
       color: #888;
     }
@@ -168,8 +168,18 @@
       <div id="prompt-help">
         Enter creates a new dpty session running <code>claude</code> with your prompt as the initial argument.
       </div>
-      <div id="status-line"></div>
     </form>
+
+    <h2>Start a new shell session</h2>
+    <form id="shell-form">
+      <input id="shell-input" type="text" autocomplete="off"
+             placeholder="bash" />
+      <div id="shell-help">
+        Enter creates a new dpty session running the named shell with no arguments (default <code>bash</code>).
+      </div>
+    </form>
+
+    <div id="status-line"></div>
 
     <h2>Connect to an active session</h2>
     <div id="sessions-list"><div class="empty">Loading...</div></div>
@@ -188,6 +198,8 @@
 
     const promptForm = document.getElementById('prompt-form');
     const promptInput = document.getElementById('prompt-input');
+    const shellForm = document.getElementById('shell-form');
+    const shellInput = document.getElementById('shell-input');
     const statusLine = document.getElementById('status-line');
     const sessionsList = document.getElementById('sessions-list');
     const brokerInput = document.getElementById('broker-input');
@@ -301,14 +313,11 @@
       }
     }
 
-    async function createSession(prompt) {
+    async function createSession(shell, args) {
       setStatus('Creating PTY...');
       try {
         const target = await client.pickAvailableServer();
-        const { alias } = await client.createPTY(target.address, {
-          shell: 'claude',
-          args: [prompt],
-        });
+        const { alias } = await client.createPTY(target.address, { shell, args });
         window.location.href = sessionUrl(target.address, alias);
       } catch (err) {
         setStatus(err.message || String(err), true);
@@ -319,7 +328,13 @@
       e.preventDefault();
       const prompt = promptInput.value.trim();
       if (!prompt) return;
-      createSession(prompt);
+      createSession('claude', [prompt]);
+    });
+
+    shellForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const shell = shellInput.value.trim() || 'bash';
+      createSession(shell, []);
     });
 
     refreshSessions();
