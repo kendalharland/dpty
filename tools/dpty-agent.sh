@@ -58,6 +58,42 @@ fi
 config_dir="${DPTY_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/dpty}"
 config_file="$config_dir/$ROLE.conf"
 
+# Seed a default (all-commented) config file on first run so users can
+# discover where to configure things without consulting docs.
+if [ ! -e "$config_file" ]; then
+    mkdir -p "$config_dir"
+    case "$ROLE" in
+        broker)
+            cat > "$config_file" <<'EOF'
+# dpty broker config — one CLI flag per line, '#' for comments.
+# Restart the agent to apply changes:
+#   macOS:  launchctl kickstart -k gui/$UID/dev.kjh.dpty-broker
+#   Linux:  systemctl --user restart dpty-broker
+# See `dpty broker -h` for the full set of flags.
+
+# -port=5127
+# -state-dir=/var/lib/dpty/broker
+EOF
+            ;;
+        server)
+            cat > "$config_file" <<'EOF'
+# dpty server config — one CLI flag per line, '#' for comments.
+# Restart the agent to apply changes:
+#   macOS:  launchctl kickstart -k gui/$UID/dev.kjh.dpty-server
+#   Linux:  systemctl --user restart dpty-server
+# See `dpty serve -h` for the full set of flags.
+
+# -port=5137
+# -broker=http://localhost:5127
+# -advertise=http://your-host-or-ip:5137
+# -shell=/bin/bash
+# -arg=-l
+# -env=PATH=/usr/local/bin:/usr/bin:/bin
+EOF
+            ;;
+    esac
+fi
+
 cfg_quoted=""
 if [ -f "$config_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
