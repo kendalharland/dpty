@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -155,6 +157,13 @@ func (b *Broker) handleRegister(c *gin.Context) {
 	if req.ID == "" || req.Address == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id and address required"})
 		return
+	}
+	// If a remote server registers an advertise URL pointing at loopback,
+	// it's almost certainly the default and unreachable to anyone else.
+	// Substitute the peer IP we observed so clients get a usable address.
+	if rewritten, ok := rewriteLoopbackAddress(req.Address, c.ClientIP()); ok {
+		b.log.Printf("Rewrote loopback advertise %q -> %q for server %s\n", req.Address, rewritten, req.ID)
+		req.Address = rewritten
 	}
 
 	now := time.Now()
@@ -332,4 +341,46 @@ func (b *Broker) persistLocked() {
 	if err := writeBrokerState(b.cfg.StateDir, entries); err != nil {
 		b.log.Printf("Failed to persist broker state: %v\n", err)
 	}
+}
+
+// rewriteLoopbackAddress swaps a loopback host in addr (localhost,
+// 127.0.0.0/8, ::1) for peerIP when peerIP is a routable address. The
+// port and scheme are preserved. Returns the new URL and true on rewrite,
+// or "" and false if no change was needed (or if either input was
+// unparseable).
+//
+// This makes the common case "remote dpty serve registers with the
+// default http://localhost:5137 advertise" produce a URL that browsers
+// and other clients can actually reach.
+func rewriteLoopbackAddress(addr, peerIP string) (string, bool) {
+	if peerIP == "" || isLoopbackHost(peerIP) {
+		return "", false
+	}
+	u, err := url.Parse(addr)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	if !isLoopbackHost(u.Hostname()) {
+		return "", false
+	}
+	host := peerIP
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if p := u.Port(); p != "" {
+		host = host + ":" + p
+	}
+	u.Host = host
+	return u.String(), true
+}
+
+func isLoopbackHost(h string) bool {
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
