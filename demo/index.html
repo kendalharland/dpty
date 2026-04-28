@@ -188,11 +188,16 @@
   <script type="module">
     import { Client } from './dpty.js';
 
-    // Broker URL: defaults to localhost:5127. Override at runtime by
-    // appending ?broker=http://host:port to the page URL.
+    // Broker URL precedence:
+    //   1. ?broker=... URL param  (one-off override, not persisted)
+    //   2. localStorage 'dpty.brokerUrl'  (set via the input box below)
+    //   3. built-in default
+    const BROKER_STORAGE_KEY = 'dpty.brokerUrl';
+    const DEFAULT_BROKER_URL = 'http://localhost:5127';
     const BROKER_URL =
       new URLSearchParams(window.location.search).get('broker')
-      || 'http://localhost:5127';
+      || localStorage.getItem(BROKER_STORAGE_KEY)
+      || DEFAULT_BROKER_URL;
 
     const client = new Client(BROKER_URL);
 
@@ -207,9 +212,16 @@
     brokerInput.value = BROKER_URL;
     function applyBroker() {
       const next = brokerInput.value.trim();
-      if (!next || next === BROKER_URL) return;
+      if (next === BROKER_URL) return;
+      if (next) {
+        localStorage.setItem(BROKER_STORAGE_KEY, next);
+      } else {
+        localStorage.removeItem(BROKER_STORAGE_KEY);
+      }
+      // Reload onto a clean URL so the persisted value, not a stale
+      // ?broker= param, drives subsequent loads.
       const url = new URL(window.location.href);
-      url.searchParams.set('broker', next);
+      url.searchParams.delete('broker');
       window.location.href = url.toString();
     }
     brokerInput.addEventListener('change', applyBroker);
@@ -294,9 +306,11 @@
         row.appendChild(meta);
 
         const link = document.createElement('a');
-        link.className = 'session-action' + (s.inUse ? ' disabled' : '');
-        link.textContent = s.inUse ? 'In use' : 'Reopen';
-        if (!s.inUse) {
+        const missingAddr = !s.serverAddress;
+        const disabled = s.inUse || missingAddr;
+        link.className = 'session-action' + (disabled ? ' disabled' : '');
+        link.textContent = s.inUse ? 'In use' : missingAddr ? 'No address' : 'Reopen';
+        if (!disabled) {
           link.href = sessionUrl(s.serverAddress, s.alias);
         }
         row.appendChild(link);
